@@ -354,29 +354,11 @@ proc riscLoadModule(target: string; file: File; W: File; verbose: bool): riscMod
   ## if `verbose` is set.
   try:
     let t = if target.endsWith(".rsc"): substr(target, 0, len(target) - 5) else: target
-    let modid = riscReadString(file)
-    if t != modid:
-      writeLine(stderr, "Warning: " & target & " has been compiled from " & modid & " module")
-
-    let key = riscReadInt32(file)
-    if key != cast[int32](hash(modid)): # Dependencies checks with key
-      raise newException(ValueError, "Found key " & $key & " != " & $cast[int32](hash(t)) & " expected")
-    if readChar(file) != '\x01': # 0x1
-      raise newException(ValueError, "Version != 1")
-    result.memSize = riscReadInt32(file)
-    # IO information
-    if riscReadString(file) != "IO":
-      raise newException(ValueError, "IO")
-    if riscReadInt32(file) != 0x3A83_72E2'i32:
-      raise newException(ValueError, "0x3A83_72E2 magic value")
-    if readChar(file) != '\x00':
-      raise newException(ValueError, "Imports")
-    if riscReadInt32(file) != 0:
-      raise newException(ValueError, "Type descriptors")
-    result.dataSize = riscReadInt32(file)
-    if riscReadInt32(file) != 0:
-      raise newException(ValueError, "Strings")
-    result.codeSize = riscReadInt32(file) * int32(osgWordSize)
+    let byteSize = int32(file.getFileSize())
+    let wordSize = int32(file.getFileSize()) div int32(osgWordSize)
+    result.memSize = wordSize
+    result.dataSize = 0
+    result.codeSize = byteSize
 
     # Caution: Hack!
     # We make the code start at address 1 instead of 0 because `PC == 0` is the condition
@@ -388,38 +370,8 @@ proc riscLoadModule(target: string; file: File; W: File; verbose: bool): riscMod
     # Load code and allocate module memory at the same time
     riscLoadCode(file, result, W, verbose)
 
-    # Commands
-    var nocmd = riscReadInt32(file)
-    for i in 1 .. nocmd:
-      var riscCmd = riscReadString(file)
-      result.commands.add riscCmd
-      result.commandAddr.add(riscReadInt32(file) + result.dataSize)
-    if readChar(file) != '\x00':
-      raise newException(ValueError, "Commands")
-
     # Entries
-    discard riscReadInt32(file)     # Number of entries?
-    result.codeAddr = riscReadInt32(file) + result.dataSize # Address of module entry
-    for i in 0 ..< nocmd:
-      discard (riscReadInt32(file) + result.dataSize)   # Entry addresses
-    
-    # Pointers
-    if riscReadInt32(file) != -1:
-      raise newException(ValueError, "Pointers are not supported")
-    let fixlist = riscReadInt32(file)
-    let fixorgD = riscReadInt32(file)
-    if riscReadInt32(file) != 0:
-      raise newException(ValueError, "Fixup type descriptors")
-    if riscReadInt32(file) != result.codeAddr - result.dataSize:
-      raise newException(ValueError, "Entry")
-    if readChar(file) != 'O':
-      raise newException(ValueError, "End of object file marker")
-
-    # Fix-up memory addresses for BL and LDR/STR/ADD instructions
-    # There is no need for these linker operations in Nim0 as our memory
-    # model is simplified.
-    #riscFixupBL(result, fixlist)
-    #riscFixupLDR(result, fixorgD)
+    result.codeAddr = 0 + result.dataSize # Address of module entry
 
     # Show source if debug
     if verbose:

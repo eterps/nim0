@@ -1219,16 +1219,8 @@ proc osgClose*(modid: string; key, datasize: int32; topScope: osgObject) =
   ## commands = {comname offset} 0X.
   ## entries = nof {word}.
   ## ptrrefs = {word} 0.
-  ## ```
+
   var
-    i: int
-    nofent: int32     # Number of file entries?
-    nofimp: int32     # Number of files imported?
-    comsize: int32    # Memory size for commands
-    size: int32       # Memory size to load module?
-    nocmd: int32      # Number of commands. Does not exist in Oberon object
-                      # file format but makes a simpler RISC emulator.
-    obj: osgObject
     name: string
     F: File
 
@@ -1236,70 +1228,12 @@ proc osgClose*(modid: string; key, datasize: int32; topScope: osgObject) =
   osgPut2(osgLDW, LNK, SP, 0)
   osgPut1(osgADD, SP, SP, osgWordSize)
   osgPut3(BR, AL, LNK)
-  
-  # Go through the list of top level symbols and check those who are commands.
-  obj = topScope.next
-  comsize = osgWordSize
-  nofent = 1
-  nofimp = 1
-  nocmd = 0
-  while obj != nil:
-    if obj.comd:
-      i = len(obj.name)     # Count entries and commands
-      i = (i + osgWordSize) div osgWordSize * osgWordSize # Align to 4 bytes
-      inc(comsize, i + osgWordSize)
-      inc(nofent)
-      inc(nofimp)
-      inc(nocmd)
-    obj = obj.next
-
-  size = datasize + comsize + (osgPc + nofimp + nofent + 1) * osgWordSize
 
   osgMakeFileName(name, modid, ".rsc")
   if not open(F, name, fmWrite):
     ossMark("Can't write to RSC file " & name)
 
-  # RISC object file header
-  osgWriteString(F, modid)       # Module name
-  osgWriteInt32(F, key)          # Dependency check
-  write(F, '\x01')            # version
-  osgWriteInt32(F, size)         # Total size of memory in bytes
-  osgWriteString(F, "IO")        # Imports name (here module IO in Oberon-0)
-  osgWriteInt32(F, 0x3A83_72E2'i32) # Import key (probably value related to module IO)
-  write(F, '\x00')            # No more imports
-  osgWriteInt32(F, 0'i32)        # No type descriptors
-  osgWriteInt32(F, datasize)     # Size of data
-  osgWriteInt32(F, 0'i32)        # No strings
-  osgWriteInt32(F, osgPc)        # Size of program code
-  # Program
   if writeBuffer(F, addr osgCode[0], osgPc * osgWordSize) != osgPc * osgWordSize:
     ossMark("Can't write resulting code to file")
-
-  # Commands (external proc that can be called by the RISC emulator)
-  osgWriteInt32(F, nocmd)        # The number of commands entry points
-  obj = topScope.next
-  while obj != nil:
-    if obj.comd:
-      osgWriteString(F, obj.name)
-      osgWriteInt32(F, obj.val)  # Address of command in bytes
-    obj = obj.next
-  write(F, '\x00')
   
-  # Entries
-  osgWriteInt32(F, nofent)       # Number of entries
-  osgWriteInt32(F, entry)        # The module entry point
-  obj = topScope.next
-  while obj != nil:           # Entries procedures
-    if obj.comd:
-      osgWriteInt32(F, obj.val)  # Address of entry in bytes
-    obj = obj.next
-  
-  osgWriteInt32(F, -1'i32)       # No pointer variables
-  osgWriteInt32(F, fixlist)      # Head of fixup list for BL instructions
-  osgWriteInt32(F, fixorgD)      # Head of fixup list for LDR/STR/ADD instructions
-  osgWriteInt32(F, 0'i32)        # No fixup list for type descriptors
-  osgWriteInt32(F, entry)        # ? Not documented
-  write(F, 'O')               # End of RISC object file
   close(F)
-
-
